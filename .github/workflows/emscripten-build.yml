@@ -4,7 +4,7 @@ on:
   workflow_dispatch:
 
 env:
-  SDL3_VERSION: 3.2.6
+  SDL3_VERSION: 3.2.8
   TTF_VERSION: 3.2.0
   IMAGE_VERSION: 3.2.0
   MIXER_VERSION: 2.8.1
@@ -12,10 +12,19 @@ env:
 
 jobs:
   build:
-    runs-on: ubuntu-20.04
+    runs-on: ubuntu-latest
         
     steps:
     - uses: actions/checkout@v4
+    - name: Set up Ninja
+      uses: aseprite/get-ninja@main
+    - name: Set up SDL
+      uses: libsdl-org/setup-sdl@main
+      id: sdl
+      with:
+        cmake-generator: Ninja
+        version: 3-head
+        shell: sh
     - name: Get Emscripten
       run: |
         git clone https://github.com/emscripten-core/emsdk.git --depth=1
@@ -26,16 +35,25 @@ jobs:
       run: |
         git clone --depth 1 --branch release-$SDL3_VERSION https://github.com/libsdl-org/SDL.git
         git clone --depth 1 --recurse-submodules --branch release-$TTF_VERSION https://github.com/libsdl-org/SDL_ttf.git
-        git clone --depth 1 --branch release-$IMAGE_VERSION https://github.com/libsdl-org/SDL_image.git
-        git clone --depth 1 --branch release-$MIXER_VERSION https://github.com/libsdl-org/SDL_mixer.git
+        git clone --depth 1 --recurse-submodules --branch release-$IMAGE_VERSION https://github.com/libsdl-org/SDL_image.git
+        git clone --depth 1 --recurse-submodules --branch release-$MIXER_VERSION https://github.com/libsdl-org/SDL_mixer.git
+    - name: Set up dependencies
+      run: |
+        sudo apt-get update
+          sudo apt-get -y install \
+            cmake \
+            file \
+            fonts-dejavu-core \
+            libfreetype-dev \
+            libharfbuzz-dev \
+            pkg-config \
+            ${NULL+}
     - name: Build
       run: |
         source emsdk/emsdk_env.sh
-        mkdir SDL/build; cd SDL/build; export SDL3_DIR=$(pwd); emcmake cmake ..; emmake make -j4; cd ../..
-        sudo apt-get update
-        sudo apt-get -y install cmake file fonts-dejavu-core libfreetype-dev libharfbuzz-dev pkg-config
-        mkdir SDL_ttf/build; cd SDL_ttf/build; emcmake cmake -DSDL3_DIR=$SDL3_DIR -DSDLTTF_HARFBUZZ=ON -DCMAKE_BUILD_TYPE=Release ..; emmake make -j4; ls -l; cd ../..
-        emcc -s LINKABLE=1 -s EXPORTED_RUNTIME_METHODS="['addFunction', 'allocateUTF8','UTF8ToString', 'stringToUTF8', 'getValue', 'setValue']" -s ALLOW_MEMORY_GROWTH=1 -s ALLOW_TABLE_GROWTH=1 -s EXPORT_ALL -s DEFAULT_LIBRARY_FUNCS_TO_INCLUDE='$addFunction' SDL/build/libSDL3.a -o sdl.html
+        mkdir SDL/build; cd SDL/build; emcmake cmake -DSL_SHARED=OFF -DSDL_STATIC=ON -DSDL_INSTALL_TESTS=OFF -DBUILD_SHARED_LIBS=OFF -DCMAKE_BUILD_TYPE=Release ..; emmake make -j4; cd ../..; export SDL_DIR=$(pwd)/SDL/cmake && echo $SDL_DIR
+        mkdir SDL_ttf/build; cd SDL_ttf/build; emcmake cmake -DSDL_STATIC=ON -DSDLTTF_HARFBUZZ=ON -DSDLTTF_VENDORED=ON -DSDL_INSTALL_TESTS=OFF -DSDL_DIR=$SDL_DIR -DCMAKE_BUILD_TYPE=Release ..; emmake make -j4; ls -l; cd ../..
+        emcc -s LINKABLE=1 -s EXPORTED_RUNTIME_METHODS="['addFunction', 'allocateUTF8','UTF8ToString', 'stringToUTF8', 'getValue', 'setValue']" -s ALLOW_MEMORY_GROWTH=1 -s ALLOW_TABLE_GROWTH=1 -s MAXIMUM_MEMORY=1gb -s EXPORT_ALL -s DEFAULT_LIBRARY_FUNCS_TO_INCLUDE='$addFunction' SDL/build/libSDL3.a SDL_ttf/build/libSDL3_ttf.a -o sdl.html
     - name: Prepare for upload
       run: |
         mkdir _site
